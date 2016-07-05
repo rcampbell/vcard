@@ -1,5 +1,6 @@
 module VCard where
 
+import System.IO (withFile, IOMode(WriteMode), hSetEncoding, utf8, hPutStr)
 import Text.ParserCombinators.Parsec
 import Text.Parsec.Char (crlf)
 import Text.Parsec.String (parseFromFile)
@@ -50,17 +51,6 @@ ichar c = char (toLower c) <|> char (toUpper c)
 istring :: String -> Parser String
 istring s = try (mapM ichar s) <?> "\"" ++ s ++ "\""
 
--- TODO, clean me!
-components :: Parser [[String]]
-components = values `sepBy` semicolon
-  where values = text `sepBy` comma
-        text = many (noneOf ";,\r\n")
-        semicolon = char ';'
-        comma = char ','
-
--- TODO clean me!
-filter_empty_components = filter (\ss -> concat ss /= "")
-
 -- TODO clean me!
 pref :: Parser String
 pref = do string "PREF"
@@ -71,17 +61,21 @@ pref = do string "PREF"
 
 {- | 3. vCard Format Specification -}
 
--- | 3.3. ABNF Format Definition
+-- | 3.3. ABNF Format Definition 1*
 
-data VCard = VCard { vc_version :: Maybe VERSION
-                   , vc_properties :: Properties
-                   } deriving (Show)
+data VCard = VCard
+  { vc_version    :: Maybe VERSION
+  , vc_properties :: Properties
+  } deriving (Show)
 
 instance Write VCard where
-  write c = "BEGIN:VCARD\r\n" ++
+  write c = "BEGIN:VCARD" ++ nl ++
             mwrite (vc_version c) ++
             write (vc_properties c) ++
-            "END:VCARD\r\n"
+            "END:VCARD" ++ nl
+
+vcardEntity = do
+  many1 vcard
 
 vcard :: Parser VCard
 vcard = do
@@ -91,21 +85,134 @@ vcard = do
   end
   return (VCard { vc_version = v, vc_properties = p }) -- TODO
 
-data Properties = Properties { p_version :: Maybe VERSION
-                             , p_fn :: [FN]
-                             , p_n :: Maybe N
-                             , p_tel :: TEL
-                             , p_prodid :: Maybe PRODID
-                             , p_x :: [X]
+
+-- | contentline
+{- TODO is this even needed?
+data ContentLine = ContentLine { group :: Maybe Group
+                               , property :: Property
+                               , 
+contentline = ""
+-}
+
+-- | group
+
+data Group = Group String
+
+instance Write Group where
+  write (Group s) = s ++ "."
+
+group :: Parser Group
+group = do
+  g <- (many1 (alphaNum <|> char '-'))
+  char '.'
+  return $ Group g
+
+
+{- | 3.4. Property Value Escaping -}
+
+-- | Property value parser for multiple values delimited by commas
+pvalues :: Parser [String]
+pvalues = do
+  vs <- many value `sepBy` char ','
+  return $ map concat vs
+  where value = nonEscape <|> escape
+        nonEscape = fmap return (noneOf ("\\,\r\n"))
+        escape = do
+          b <- char '\\'
+          c <- oneOf "\\,;nN"
+          return [b, c]
+
+-- | Property value parser for multiple fields delimited by semicolons
+pfields :: Parser [[String]]
+pfields = do
+  fs <- field `sepBy` char ';'
+  return $ map (map concat) fs
+  where field = many component `sepBy` char ','
+        component = nonEscape <|> escape
+        nonEscape = fmap return (noneOf "\\,;\r\n")
+        escape = do
+          b <- char '\\'
+          c <- oneOf "\\,;nN"
+          return [b, c]
+
+
+{- | 5. Property Parameters -}
+
+data Parameters = Parameters { param_value :: [VALUE]
+                             , param_type  :: [TYPE]
                              } deriving (Show)
 
-instance Write Properties where
-  write p = lwrite (p_fn p) ++
-            mwrite (p_n p) ++
---            write (p_tel p) ++
-            mwrite (p_prodid p) ++
-            lwrite (p_x p)
+instance Write Parameters where
+  write p = lwrite (param_value p) ++
+            lwrite (param_type p)
 
+params = permute (Parameters
+                  <$?> ([], many1 valueParam)
+                  <|?> ([], many1 typeParam))
+
+-- TODO somehow fail on unquoted : or ; unless it's the next param or value
+paramValues :: Parser [String]
+paramValues = do
+  vs <- many value `sepBy` char ','
+  return $ map concat vs
+  where value = nonEscape <|> escape
+        nonEscape = fmap return (noneOf (",:;\""))
+        escape = do
+          s <- char '"'
+          v <- many (noneOf "\"")
+          e <- char '"'
+          return ([s] ++ v ++ [e])
+          
+          
+-- | 5.2. VALUE
+-- TODO support all those predefined values
+
+data VALUE = VALUE String
+  deriving (Show)
+
+instance Write VALUE where
+  write (VALUE s) = ";VALUE=" ++ s
+
+valueParam :: Parser VALUE
+valueParam = do
+  istring ";VALUE="
+  v <- many (noneOf ",:;")
+  return $ VALUE v
+
+
+-- | 5.6 TYPE
+
+data TYPE = TYPE [String]
+  deriving (Show)
+
+instance Write TYPE where
+  write (TYPE ss) = ";TYPE=" ++ vs
+    where vs = concat $ intersperse "," ss
+
+typeParam :: Parser TYPE
+typeParam = do
+  istring ";TYPE="
+  vs <- paramValues
+  return $ TYPE vs
+
+
+{- | 6. vCard Properties -}
+
+data Properties = Properties
+  { prop_version :: Maybe VERSION
+  , prop_fn      :: [FN]
+  , prop_n       :: Maybe N
+  , prop_tel     :: [TEL]
+  , prop_prodid  :: Maybe PRODID
+  , prop_x       :: [X]
+  } deriving (Show)
+
+instance Write Properties where
+  write p = lwrite (prop_fn p) ++
+            mwrite (prop_n p) ++
+            lwrite (prop_tel p) ++
+            mwrite (prop_prodid p) ++
+            lwrite (prop_x p)
 
 -- TODO
 -- The reason I use many1 for tel and x instead of many for
@@ -119,29 +226,14 @@ properties = permute (Properties
                        <|?> (Nothing, Just `liftM` n)
                        <|?> ([], many1 tel)
                        <|?> (Nothing, Just `liftM` prodid)
-                       <|?> ([], many1 x))                        
-
-group :: Parser String
-group = do
-  g <- (many1 (alphaNum <|> char '-'))
-  char '.'
-  return g
-
-
-
-
-
-
-{- | 6. vCard Properties -}
+                       <|?> ([], many1 x))                
 
 
 -- | 6.1.1. BEGIN
 
 begin :: Parser ()
 begin = do
-  istring "BEGIN"
-  char ':'
-  istring "VCARD"
+  istring "BEGIN:VCARD"
   crlf
   return ()
   
@@ -150,9 +242,7 @@ begin = do
 
 end :: Parser ()
 end = do
-  istring "END"
-  char ':'
-  istring "VCARD"
+  istring "END:VCARD"
   crlf
   return ()
 
@@ -187,9 +277,9 @@ n :: Parser N
 n = do
   ichar 'N'
   char ':'
-  v <- components
+  fs <- pfields 
   crlf
-  return (N (filter_empty_components v))
+  return (N fs)
 
 
 -- 6.3.1. ADR
@@ -199,48 +289,31 @@ adr = do
   char ';'
 --  p <- params
   char ':'
-  v <- components
+  fs <- pfields
   crlf
-  return (filter_empty_components v)
+  return fs
 
 
 -- 6.4.1. TEL *
 
-type TEL = [([String], String)]
+data TEL = TEL { tel_params :: Parameters
+               , tel_value  :: String
+               } deriving (Show)
 
-{-
 instance Write TEL where
-  write [] = ""
-  write ((p, t):ts) = "TEL;" ++ p 
--}
-tel :: Parser ([String], String)
+  write t = "TEL" ++
+            write (tel_params t) ++
+            ":" ++
+            tel_value t ++
+            nl
+
+tel :: Parser TEL
 tel = do
   istring "TEL"
-  char ';'
-  p <- params
+  ps <- params
   char ':'
   v <- manyTill anyChar crlf
-  return (p, v)
-  where params = (try pvalue <|> try pref <|> try ptype) `sepBy` (char ';')
-        pvalue = do string "VALUE"
-                    char '='
-                    string "text" <|> string "uri"
-        ptype = do istring "TYPE"
-                   char '='
-                   try vlist <|> plist
-        vlist = do v <- between
-                     (char '"')
-                     (char '"')
-                     ((many (noneOf "\"")) `sepBy` (char ',')) :: Parser [String]
-                   return (concat (intersperse "," v))
-        plist = try (istring "text")
-                <|> try (istring "voice")
-                <|> try (istring "fax")
-                <|> try (istring "cell")
-                <|> try (istring "video")
-                <|> try (istring "pager")
-                <|> try (istring "textphone")
-                <|> try (many (noneOf ";:\r\n"))
+  return $ TEL { tel_params = ps, tel_value = v }
 
 
 -- 6.4.2. EMAIL
@@ -355,11 +428,26 @@ tests_gender = test [ "Gender" ~: "show" ~: "GENDER:M" ~=? (show Gender {sex = J
 -}
 
 
+
+{- | I/O -}
+
+-- | Reading
+
+
+-- | Writing, must be UTF-8 and should have a .vcf or .vcard extension
+writeVCard :: FilePath -> VCard -> IO ()
+writeVCard f c = do
+  withFile f WriteMode $ \h -> do
+    hSetEncoding h utf8
+    hPutStr h (write c)
+
+
+
 -- UTILITY STUFF!!!!!!!
 p1 = do
-  result <- parseFromFile vcard "sample1"
+  result <- parseFromFile vcardEntity "../hs/sample1"
   case result of
     Left err -> print err
     Right xs -> do print xs
                    putStr "\n"
-                   putStrLn (write xs)
+                   putStrLn (lwrite xs)
