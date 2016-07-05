@@ -1,3 +1,5 @@
+module VCard where
+
 import Text.ParserCombinators.Parsec
 import Text.Parsec.Char (crlf)
 import Text.Parsec.String (parseFromFile)
