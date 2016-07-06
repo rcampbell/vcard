@@ -6,19 +6,29 @@ import Text.Parsec.Char (crlf)
 import Text.Parsec.String (parseFromFile)
 import Text.Parsec.Perm (permute, (<$$>), (<$?>), (<||>), (<|?>))
 import Control.Monad (liftM)
+-- import Network.URI (URI, parseURI) TODO do I want to even validate?
 import Data.Char (toLower, toUpper, isSpace)
-import Data.List (intersperse)
+import Data.List (intercalate)
+import Data.Time.Format (parseTimeM, formatTime, defaultTimeLocale)
+import Data.Time.Clock (UTCTime)
 import Test.HUnit
 
 {- TODO
 
- - The permutation parser for contentlines fails on later isolated instances
+ * The permutation parser for contentlines fails on later isolated instances
 
- - Groups break my permutation parsing
+ * Groups break my permutation parsing
 
- - The folding (wrapping) logic isn't implemented, breaks
+ * The folding (wrapping) logic isn't implemented, breaks
 
- - Look into moving from String to Text or ByteString
+ - Date, time types, https://two-wrongs.com/haskell-time-library-tutorial
+
+ - There is tons of duplication among similar property parsers. I'm hesitant to
+   start factoring it out before I make them more fully correct, supporting each
+   property's nuances... 
+
+ - Look into moving from String to Text or ByteString. More generally, no
+   consideration has yet been given to space and time optimization. 
 
  - Should I trim? During parsing or afterwards?
 
@@ -46,10 +56,13 @@ mwrite :: Write a => Maybe a -> String
 mwrite Nothing = ""
 mwrite (Just x) = write x
 
+-- | Used by Write class instances for writing property values
+vwrite :: [String] -> String
+vwrite = intercalate ","
+
 -- | Used by Write class instances for writing property value fields
 fwrite :: [[String]] -> String
-fwrite sss = join ";" (map (join ",") sss)
-  where join c = concat . intersperse c
+fwrite sss = intercalate ";" (map (intercalate ",") sss)
 
 
 {- | Generic parsers -}
@@ -204,8 +217,7 @@ data TYPE = TYPE [String]
   deriving (Show)
 
 instance Write TYPE where
-  write (TYPE ss) = ";TYPE=" ++ vs
-    where vs = concat $ intersperse "," ss
+  write (TYPE ss) = ";TYPE=" ++ (intercalate "," ss)
 
 typeParam :: Parser TYPE
 typeParam = do
@@ -217,39 +229,54 @@ typeParam = do
 {- | 6. vCard Properties -}
 
 data Properties = Properties
-  { prop_fn      :: [FN]
-  , prop_n       :: Maybe N
-  , prop_adr     :: [ADR]
-  , prop_tel     :: [TEL]
-  , prop_email   :: [EMAIL]
-  , prop_org     :: [ORG]
-  , prop_note    :: [NOTE]
-  , prop_prodid  :: Maybe PRODID
-  , prop_rev     :: Maybe REV
-  , prop_url     :: [URL]
-  , prop_version :: Maybe VERSION
-  , prop_x       :: [X]
+  { prop_source   :: [SOURCE]
+  , prop_kind     :: Maybe KIND
+  , prop_fn       :: [FN]
+  , prop_n        :: Maybe N
+  , prop_nickname :: [NICKNAME]
+  , prop_bday     :: Maybe BDAY
+  , prop_adr      :: [ADR]
+  , prop_tel      :: [TEL]
+  , prop_email    :: [EMAIL]
+  , prop_impp     :: [IMPP]
+  , prop_org      :: [ORG]
+  , prop_note     :: [NOTE]
+  , prop_prodid   :: Maybe PRODID
+  , prop_rev      :: Maybe REV
+  , prop_url      :: [URL]
+  , prop_version  :: Maybe VERSION
+  , prop_x        :: [X]
   } deriving (Show)
 
 instance Write Properties where
-  write p = lwrite (prop_fn p)     ++
-            mwrite (prop_n p)      ++
-            lwrite (prop_tel p)    ++
-            lwrite (prop_adr p)    ++
-            lwrite (prop_email p)  ++
-            lwrite (prop_org p)    ++
-            lwrite (prop_note p)   ++
-            mwrite (prop_prodid p) ++
-            mwrite (prop_rev p)    ++
-            lwrite (prop_url p)    ++
+  write p = lwrite (prop_source p)   ++
+            mwrite (prop_kind p)     ++
+            lwrite (prop_fn p)       ++
+            mwrite (prop_n p)        ++
+            lwrite (prop_nickname p) ++
+            mwrite (prop_bday p)     ++
+            lwrite (prop_tel p)      ++
+            lwrite (prop_adr p)      ++
+            lwrite (prop_email p)    ++
+            lwrite (prop_impp p)     ++
+            lwrite (prop_org p)      ++
+            lwrite (prop_note p)     ++
+            mwrite (prop_prodid p)   ++
+            mwrite (prop_rev p)      ++
+            lwrite (prop_url p)      ++
             lwrite (prop_x p)
 
 properties = permute (Properties
-                       <$$> many1 fn
+                       <$?> ([], many1 source)
+                       <|?> (Nothing, Just `liftM` kind)
+                       <||> many1 fn
                        <|?> (Nothing, Just `liftM` n)
+                       <|?> ([], many1 nickname)
+                       <|?> (Nothing, Just `liftM` bday)
                        <|?> ([], many1 adr)
                        <|?> ([], many1 tel)
                        <|?> ([], many1 email)
+                       <|?> ([], many1 impp)
                        <|?> ([], many1 org)
                        <|?> ([], many1 note)
                        <|?> (Nothing, Just `liftM` prodid)
@@ -259,7 +286,7 @@ properties = permute (Properties
                        <|?> ([], many1 x))                
 
 
--- | 6.1.1. BEGIN
+-- | 6.1.1. BEGIN 1
 
 begin :: Parser ()
 begin = do
@@ -268,13 +295,57 @@ begin = do
   return ()
   
 
--- 6.1.2. END
+-- 6.1.2. END 1
 
 end :: Parser ()
 end = do
   istring "END:VCARD"
   crlf
   return ()
+
+
+-- | 6.1.3. SOURCE *
+
+data SOURCE = SOURCE { source_param :: Parameters
+                     , source_value :: String
+                     } deriving (Show)
+
+instance Write SOURCE where
+  write r = "SOURCE" ++
+            write (source_param r) ++
+            ":" ++
+            source_value r ++
+            nl
+
+source :: Parser SOURCE
+source = do
+  istring "SOURCE"
+  p <- params
+  char ':'
+  v <- manyTill anyChar crlf
+  return $ SOURCE p v
+
+
+-- | 6.1.4. KIND *1
+
+data KIND = KIND { kind_param :: Parameters
+                 , kind_value :: String
+                 } deriving (Show)
+
+instance Write KIND where
+  write r = "KIND" ++
+            write (kind_param r) ++
+            ":" ++
+            kind_value r ++
+            nl
+
+kind :: Parser KIND
+kind = do
+  istring "KIND"
+  p <- params
+  char ':'
+  v <- manyTill anyChar crlf
+  return $ KIND p v
 
 
 -- | 6.2.1. FN 1*
@@ -285,12 +356,12 @@ data FN = FN { fn_group :: Maybe Group
              } deriving (Show)
 
 instance Write FN where
-  write fn = mwrite (fn_group fn) ++
-             "FN" ++
-             write (fn_param fn) ++
-             ":" ++
-             fn_value fn ++
-             nl
+  write r = mwrite (fn_group r) ++
+            "FN" ++
+            write (fn_param r) ++
+            ":" ++
+            fn_value r ++
+            nl
 
 fn ::Parser FN
 fn = do
@@ -318,6 +389,50 @@ n = do
   crlf
   return $ N fs
 
+
+-- | 6.2.3. NICKNAME *
+
+data NICKNAME = NICKNAME { nickname_param :: Parameters
+                         , nickname_value :: [String]
+                         } deriving (Show)
+
+instance Write NICKNAME where
+  write r = "NICKNAME" ++
+            write (nickname_param r) ++
+            ":" ++
+            vwrite (nickname_value r) ++
+            nl
+
+nickname :: Parser NICKNAME
+nickname = do
+  istring "NICKNAME"
+  p <- params
+  char ':'
+  v <- propValues
+  crlf
+  return $ NICKNAME p v
+
+
+-- | 6.2.4. PHOTO *
+
+-- | 6.2.5. BDAY *1
+
+data BDAY = BDAY { bday_param :: Parameters
+                 --, bday_value :: Either Date String
+                 , bday_value :: String
+                 } deriving (Show)
+
+instance Write BDAY where
+  write r = ""
+
+bday :: Parser BDAY
+bday = do
+  istring "BDAY"
+  p <- params
+  char ':'
+  v <- manyTill anyChar crlf
+  return $ BDAY p v
+                 
 
 -- | 6.3.1. ADR *
 
@@ -369,24 +484,47 @@ tel = do
 
 -- | 6.4.2. EMAIL *
 
-data EMAIL = EMAIL { email_params :: Parameters
-                   , email_value  :: String
+data EMAIL = EMAIL { email_param :: Parameters
+                   , email_value :: String
                    } deriving (Show)
 
 instance Write EMAIL where
-  write e = "EMAIL" ++
-            write (email_params e) ++
+  write r = "EMAIL" ++
+            write (email_param r) ++
             ":" ++
-            email_value e ++
+            email_value r ++
             nl
 
 email :: Parser EMAIL
 email = do
   istring "EMAIL"
-  ps <- params
+  p <- params
   char ':'
   v <- manyTill anyChar crlf
-  return $ EMAIL { email_params = ps, email_value = v }
+  return $ EMAIL p v
+
+
+-- | 6.4.3. IMPP *
+
+data IMPP = IMPP { impp_param :: Parameters
+                 , impp_value :: String
+                 } deriving (Show)
+
+instance Write IMPP where
+  write r = "IMPP" ++
+            write (impp_param r) ++
+            ":" ++
+            impp_value r ++
+            nl
+
+-- TODO spit out some URI validation warning, though I don't think I want to toss them..
+impp :: Parser IMPP
+impp = do
+  istring "IMPP"
+  p <- params
+  char ':'
+  v <- manyTill anyChar crlf
+  return $ IMPP p v
 
 
 -- | 6.6.4. ORG *
@@ -472,6 +610,7 @@ instance Write URL where
             url_value u ++
             nl
 
+-- TODO issue warning if v not a valid URI, don't think I want to toss it out though..
 url :: Parser URL
 url = do
   istring "URL"
