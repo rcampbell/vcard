@@ -90,15 +90,19 @@ instance Write VCard where
             write (vc_contentlines c) ++
             "END:VCARD" ++ nl
 
+data Foo = Foo Int deriving (Eq, Ord)
+
 vcardEntity = do
   many1 vcard
 
 vcard :: Parser VCard
 vcard = do
   begin
-  cls <- contentLines
-  end
-  return $ VCard cls
+  cls <- manyTill (try contentLines) end
+  return $ VCard (foldl1 merge cls)
+  -- TODO this is the ugliest thing I've ever written
+  where merge (ContentLines version source kind fn n nickname bday adr tel email impp org note prodid rev url x)
+              (ContentLines version' source' kind' fn' n' nickname' bday' adr' tel' email' impp' org' note' prodid' rev' url' x') = ContentLines (max version version') (source ++ source') (max kind kind') (fn ++ fn') (max n n') (nickname ++ nickname') (max bday bday') (adr ++ adr') (tel ++ tel') (email ++ email') (impp ++ impp') (org ++ org') (note ++ note') (max prodid prodid') (max rev rev') (url ++ url') (x ++ x')
 
 
 -- | Content Lines
@@ -108,17 +112,17 @@ data Name = SOURCE | KIND | FN | N | NICKNAME | PHOTO | BDAY | ANNIVERSARY |
             ROLE | LOGO | ORG | MEMBER | RELATED | CATEGORIES | NOTE | PRODID |
             REV | SOUND | UID | CLIENTPIDMAP | URL | KEY | FBURL | CALADRURI |
             CALURI | XML | VERSION | X_NAME String
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 data Value = TEXT String | TEXT' [String] | TEXT'' [[String]]
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 -- TODO why can't records have different type and constructor names..?
 data CL = CL { cl_group :: Maybe Group
              , cl_name  :: Name
              , cl_param :: Parameters -- [Parameter]
              , cl_value :: Value
-             } deriving (Show)
+             } deriving (Show, Eq, Ord)
 
 instance Write Value where
   write (TEXT s) = s
@@ -140,7 +144,7 @@ instance Write CL where
 -- | Groups
 
 data Group = Group String
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 instance Write Group where
   write (Group s) = s ++ "."
@@ -191,7 +195,7 @@ propFields = do
 data Parameters = Parameters { param_value :: [VALUE]
                              , param_type  :: [TYPE]
                              , param_pref  :: [PREF]
-                             } deriving (Show)
+                             } deriving (Show, Eq, Ord)
 
 instance Write Parameters where
   write p = lwrite (param_value p) ++
@@ -221,7 +225,7 @@ paramValues = do
 -- TODO support all those predefined values
 
 data VALUE = VALUE String
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 instance Write VALUE where
   write (VALUE s) = ";VALUE=" ++ s
@@ -236,7 +240,7 @@ valueParam = do
 -- | 5.3 PREF
 
 data PREF = PREF Integer -- an integer between 1 and 100
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 instance Write PREF where
   write (PREF i) = ";PREF=" ++ show i
@@ -254,7 +258,7 @@ prefParam = do
 -- | 5.6 TYPE
 
 data TYPE = TYPE [String]
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 instance Write TYPE where
   write (TYPE ss) = ";TYPE=" ++ (intercalate "," ss)
@@ -311,7 +315,7 @@ contentLines = permute (ContentLines
                          <$?> (Nothing, Just `liftM` version) 
                          <|?> ([], many1 source)
                          <|?> (Nothing, Just `liftM` kind)
-                         <||> many1 fn
+                         <|?> ([], many1 fn) -- TODO req, but changed to opt for many try
                          <|?> (Nothing, Just `liftM` n)
                          <|?> ([], many1 nickname)
                          <|?> (Nothing, Just `liftM` bday)
@@ -558,7 +562,7 @@ writeVCard f c = do
 -- UTILITY STUFF!!!!!!!
 
 p1 = do
-  result <- parseFromFile vcardEntity "../sample1.vcf"
+  result <- parseFromFile vcardEntity "../sample2.vcf"
   case result of
     Left err -> print err
     Right xs -> do print xs
@@ -569,7 +573,6 @@ p1 = do
 
 -- sandbox
 
---p :: Parser [[String]]
 p = permute (pair
               <$$> pa
               <|?> ([], pb))
@@ -582,3 +585,4 @@ pa = do
 pb :: Parser String
 pb = do
   many1 (char 'b')
+
