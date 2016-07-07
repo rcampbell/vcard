@@ -9,9 +9,8 @@ import Text.Parsec.Perm (permute, (<$$>), (<$?>), (<||>), (<|?>))
 import Text.Regex (mkRegex, subRegex)
 import Control.Monad (liftM)
 -- import Network.URI (URI, parseURI) TODO do I want to even validate?
--- import qualified Data.Text as T
 import Data.Char (toLower, toUpper, isSpace)
-import Data.List (intercalate)
+import Data.List (intercalate, lines)
 import Data.Time.Format (parseTimeM, formatTime, defaultTimeLocale)
 import Data.Time.Clock (UTCTime)
 import Test.HUnit
@@ -32,7 +31,7 @@ import Test.HUnit
    start factoring it out before I make them more fully correct, supporting each
    property's nuances... 
 
- - Look into moving from String to Text or ByteString. More generally, no
+ - Look into moving from String to Text. More generally, no
    consideration has yet been given to space and time optimization. 
 
  - Should I trim? During parsing or afterwards?
@@ -87,6 +86,19 @@ istring s = try (mapM ichar s) <?> "\"" ++ s ++ "\""
 
 -- | 3.2. Line Delimiting and Folding
 
+z = "item1.ADR;TYPE=WORK;TYPE=pref:;;1 Infinite Loop;Cupertino;CA;95014;United States\r\n"
+
+-- TODO should be octets, not chars, don't split a multibyte char..
+fold :: String -> String
+fold s = concatMap foldLine (lines s)
+  where foldLine l = if length l > limit then
+                       take limit l ++
+                       "\r\n " ++
+                       foldLine (drop limit l)
+                     else
+                       l ++ "\n" -- replace from lines
+        limit = 75
+                 
 unfold s = subRegex (mkRegex "\r\n[ \t]") s ""
 
 
@@ -632,25 +644,21 @@ x = do
 
 -- | Reading
 
-readVCard :: FilePath -> IO ()
-readVCard f = do
-  contents <- readFile f
+readVCard :: FilePath -> FilePath -> IO ()
+readVCard fin fout = do
+  contents <- readFile fin
   let unfolded = unfold contents in
-    case (parse vcardEntity f unfolded) of
+    case (parse vcardEntity fin unfolded) of
       Left err -> print err
-      Right cs -> putStr (lwrite cs)
+      Right cs -> do putStr (fold (lwrite cs))
+                     writeVCard cs fout
 
 
 -- | Writing, must be UTF-8 and should have a .vcf or .vcard extension
 
-writeVCard :: FilePath -> [VCard] -> IO ()
-writeVCard f c = do
+writeVCard :: [VCard] -> FilePath -> IO ()
+writeVCard cs f = do
   withFile f WriteMode $ \h -> do
     hSetEncoding h utf8
-    hPutStr h (concatMap write c)
-
-
-
-
-
-
+    hPutStr h (fold (concatMap write cs))
+    
