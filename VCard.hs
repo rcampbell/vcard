@@ -643,11 +643,11 @@ readVCard f = do
 
 -- | Writing, must be UTF-8 and should have a .vcf or .vcard extension
 
-writeVCard :: FilePath -> VCard -> IO ()
+writeVCard :: FilePath -> [VCard] -> IO ()
 writeVCard f c = do
   withFile f WriteMode $ \h -> do
     hSetEncoding h utf8
-    hPutStr h (write c)
+    hPutStr h (concatMap write c)
 
 
 
