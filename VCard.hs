@@ -17,29 +17,18 @@ import Test.HUnit
 
 {- TODO
 
- * The folding (wrapping) logic isn't implemented, breaks
-
  - Unfolding outside the parser screws up line numbers compared to the file
-
  - Parameters will need the same many (try permute) fix
-
  - Update params to assume ending :
-
  - Date, time type support
-
  - There is tons of duplication among similar property parsers. I'm hesitant to
    start factoring it out before I make them more fully correct, supporting each
    property's nuances... 
-
  - Look into moving from String to Text. More generally, no
    consideration has yet been given to space and time optimization. 
-
  - Should I trim? During parsing or afterwards?
-
  - How should I perform version validation?
-
  - ... and lots of other props and params
-
  -}
 
 
@@ -111,8 +100,6 @@ instance Write VCard where
   write c = "BEGIN:VCARD" ++ nl ++
             write (vc_contentlines c) ++
             "END:VCARD" ++ nl
-
-data Foo = Foo Int deriving (Eq, Ord)
 
 vcardEntity = many1 vcard
 
@@ -265,22 +252,31 @@ propFields = do
 
 {- | 5. Property Parameters -}
 
-data Parameters = Parameters { param_value :: [VALUE]
-                             , param_type  :: [TYPE]
-                             , param_pref  :: [PREF]
-                             , param_x     :: [X_PARAM]
+data Parameters = Parameters { param_language :: [LANGUAGE]
+                             , param_value    :: [VALUE]
+                             , param_type     :: [TYPE]
+                             , param_pref     :: [PREF]
+                             , param_altid    :: [ALTID]
+                             , param_pid      :: [PID]
+                             , param_x        :: [X_PARAM]
                              } deriving (Show, Eq, Ord)
 
 instance Write Parameters where
-  write p = lwrite (param_value p) ++
-            lwrite (param_type p) ++
-            lwrite (param_pref p) ++
+  write p = lwrite (param_language p) ++
+            lwrite (param_value p)    ++
+            lwrite (param_type p)     ++
+            lwrite (param_pref p)     ++
+            lwrite (param_altid p)    ++
+            lwrite (param_pid p)      ++
             lwrite (param_x p)
 
 params = permute (Parameters
-                  <$?> ([], many1 valueParam)
+                  <$?> ([], many1 languageParam)
+                  <|?> ([], many1 valueParam)
                   <|?> ([], many1 typeParam)
                   <|?> ([], many1 prefParam)
+                  <|?> ([], many1 altidParam)
+                  <|?> ([], many1 pidParam)
                   <|?> ([], many1 xParam))
 
 -- TODO somehow fail on unquoted : or ; unless it's the next param or value
@@ -311,10 +307,25 @@ xParam = do
   v <- paramValues
   return $ X_PARAM n v
           
-          
--- | 5.2. VALUE
--- TODO support all those predefined values
 
+-- | 5.1. LANGUAGE
+
+data LANGUAGE = LANGUAGE String
+  deriving (Show, Eq, Ord)
+
+instance Write LANGUAGE where
+  write (LANGUAGE s) = ";LANGUAGE=" ++ s
+
+languageParam :: Parser LANGUAGE
+languageParam = do
+  istring ";LANGUAGE="
+  v <- many (noneOf ";:")
+  return $ LANGUAGE v
+
+    
+-- | 5.2. VALUE
+
+-- TODO support all those predefined values
 data VALUE = VALUE String
   deriving (Show, Eq, Ord)
 
@@ -324,11 +335,11 @@ instance Write VALUE where
 valueParam :: Parser VALUE
 valueParam = do
   istring ";VALUE="
-  v <- many (noneOf ",:;")
+  v <- many (noneOf ",;:")
   return $ VALUE v
 
 
--- | 5.3 PREF
+-- | 5.3. PREF
 
 data PREF = PREF Integer -- an integer between 1 and 100
   deriving (Show, Eq, Ord)
@@ -346,7 +357,39 @@ prefParam = do
   return $ PREF (read v)
 
 
--- | 5.6 TYPE
+-- | 5.4. ALTID
+
+-- TODO this completely changes the *1 property limits!!!
+data ALTID = ALTID String
+  deriving (Show, Eq, Ord)
+
+instance Write ALTID where
+  write (ALTID s) = ";ALTID=" ++ s
+
+altidParam :: Parser ALTID
+altidParam = do
+  istring ";ALTID="
+  v <- many (noneOf ";:")
+  return $ ALTID v
+
+
+-- | 5.5. PID
+
+-- TODO validate the whole Int or Int . Int format
+data PID = PID [String]
+  deriving (Show, Eq, Ord)
+
+instance Write PID where
+  write (PID ss) = ";PID=" ++ (intercalate "," ss)
+
+pidParam :: Parser PID
+pidParam = do
+  istring ";PID="
+  v <- paramValues
+  return $ PID v
+
+
+-- | 5.6. TYPE
 
 data TYPE = TYPE [String]
   deriving (Show, Eq, Ord)
@@ -357,8 +400,13 @@ instance Write TYPE where
 typeParam :: Parser TYPE
 typeParam = do
   istring ";TYPE="
-  vs <- paramValues
-  return $ TYPE vs
+  v <- paramValues
+  return $ TYPE v
+
+
+-- | 5.7. MEDIATYPE
+
+
 
 
 {- | 6. vCard Properties -}
