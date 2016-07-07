@@ -86,8 +86,6 @@ istring s = try (mapM ichar s) <?> "\"" ++ s ++ "\""
 
 -- | 3.2. Line Delimiting and Folding
 
-z = "item1.ADR;TYPE=WORK;TYPE=pref:;;1 Infinite Loop;Cupertino;CA;95014;United States\r\n"
-
 -- TODO should be octets, not chars, don't split a multibyte char..
 fold :: String -> String
 fold s = concatMap foldLine (lines s)
