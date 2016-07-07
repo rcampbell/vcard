@@ -6,6 +6,7 @@ import Text.ParserCombinators.Parsec
 import Text.Parsec.Char (crlf)
 import Text.Parsec.String (parseFromFile)
 import Text.Parsec.Perm (permute, (<$$>), (<$?>), (<||>), (<|?>))
+import Text.Regex (mkRegex, subRegex)
 import Control.Monad (liftM)
 -- import Network.URI (URI, parseURI) TODO do I want to even validate?
 -- import qualified Data.Text as T
@@ -82,9 +83,7 @@ istring s = try (mapM ichar s) <?> "\"" ++ s ++ "\""
 
 -- | 3.2. Line Delimiting and Folding
 
-le :: Parser ()
-le = try (do crlf
-             notFollowedBy (oneOf " \t"))
+unfold s = subRegex (mkRegex "\r\n[ \t]") s ""
 
 
 -- | 3.3. ABNF Format Definition 1*
@@ -611,44 +610,25 @@ x = do
 
 -- | Reading
 
+readVCard :: FilePath -> IO ()
+readVCard f = do
+  contents <- readFile f
+  let unfolded = unfold contents in
+    case (parse vcardEntity f unfolded) of
+      Left err -> print err
+      Right cs -> putStr (lwrite cs)
+
 
 -- | Writing, must be UTF-8 and should have a .vcf or .vcard extension
+
 writeVCard :: FilePath -> VCard -> IO ()
 writeVCard f c = do
   withFile f WriteMode $ \h -> do
     hSetEncoding h utf8
     hPutStr h (write c)
 
--- UTILITY STUFF!!!!!!!
-
-p1 = do
-  result <- parseFromFile vcardEntity "../sample2.vcf"
-  case result of
-    Left err -> print err
-    Right xs -> do print xs
-                   putStr "\n"
-                   putStrLn (lwrite xs)
 
 
 
--- sandbox
-
-p = permute (pair
-              <$$> pa
-              <|?> ([], pb))
-  where pair a b = (a, b)
-
-pa :: Parser String
-pa = do
-  many1 (char 'a')
-
-pb :: Parser String
-pb = do
-  many1 (char 'b')
 
 
-foo = do
-  many1 (noneOf "\r\n")
-    <|>  try (do crlf
-                 oneOf " \t"
-                 return "")
