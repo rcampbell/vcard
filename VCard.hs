@@ -26,18 +26,20 @@ import Test.HUnit
 
  - Update params to assume ending :
 
- - Date, time types, https://two-wrongs.com/haskell-time-library-tutorial
+ - Date, time type support
 
  - There is tons of duplication among similar property parsers. I'm hesitant to
    start factoring it out before I make them more fully correct, supporting each
    property's nuances... 
 
- - Look into moving from String to String or ByteString. More generally, no
+ - Look into moving from String to Text or ByteString. More generally, no
    consideration has yet been given to space and time optimization. 
 
  - Should I trim? During parsing or afterwards?
 
- - How should I perform version validation? 
+ - How should I perform version validation?
+
+ - ... and lots of other props and params
 
  -}
 
