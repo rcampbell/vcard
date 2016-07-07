@@ -1,3 +1,4 @@
+-- {-# LANGUAGE OverloadedStrings #-}
 module VCard where
 
 import System.IO (withFile, IOMode(WriteMode), hSetEncoding, utf8, hPutStr)
@@ -7,6 +8,7 @@ import Text.Parsec.String (parseFromFile)
 import Text.Parsec.Perm (permute, (<$$>), (<$?>), (<||>), (<|?>))
 import Control.Monad (liftM)
 -- import Network.URI (URI, parseURI) TODO do I want to even validate?
+-- import qualified Data.Text as T
 import Data.Char (toLower, toUpper, isSpace)
 import Data.List (intercalate)
 import Data.Time.Format (parseTimeM, formatTime, defaultTimeLocale)
@@ -17,6 +19,8 @@ import Test.HUnit
 
  * The folding (wrapping) logic isn't implemented, breaks
 
+ - Parameters will need the same many (try permute) fix
+
  - Update params to assume ending :
 
  - Date, time types, https://two-wrongs.com/haskell-time-library-tutorial
@@ -25,7 +29,7 @@ import Test.HUnit
    start factoring it out before I make them more fully correct, supporting each
    property's nuances... 
 
- - Look into moving from String to Text or ByteString. More generally, no
+ - Look into moving from String to String or ByteString. More generally, no
    consideration has yet been given to space and time optimization. 
 
  - Should I trim? During parsing or afterwards?
@@ -76,6 +80,13 @@ istring s = try (mapM ichar s) <?> "\"" ++ s ++ "\""
 
 {- | 3. vCard Format Specification -}
 
+-- | 3.2. Line Delimiting and Folding
+
+le :: Parser ()
+le = try (do crlf
+             notFollowedBy (oneOf " \t"))
+
+
 -- | 3.3. ABNF Format Definition 1*
 
 
@@ -90,8 +101,7 @@ instance Write VCard where
 
 data Foo = Foo Int deriving (Eq, Ord)
 
-vcardEntity = do
-  many1 vcard
+vcardEntity = many1 vcard
 
 vcard :: Parser VCard
 vcard = do
@@ -636,3 +646,9 @@ pb :: Parser String
 pb = do
   many1 (char 'b')
 
+
+foo = do
+  many1 (noneOf "\r\n")
+    <|>  try (do crlf
+                 oneOf " \t"
+                 return "")
