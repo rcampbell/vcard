@@ -15,8 +15,6 @@ import Test.HUnit
 
 {- TODO
 
- * The permutation parser for contentlines fails on later isolated instances
-
  * The folding (wrapping) logic isn't implemented, breaks
 
  - Update params to assume ending :
@@ -101,8 +99,60 @@ vcard = do
   cls <- manyTill (try contentLines) end
   return $ VCard (foldl1 merge cls)
   -- TODO this is the ugliest thing I've ever written
-  where merge (ContentLines version source kind fn n nickname bday adr tel email impp org note prodid rev url x)
-              (ContentLines version' source' kind' fn' n' nickname' bday' adr' tel' email' impp' org' note' prodid' rev' url' x') = ContentLines (max version version') (source ++ source') (max kind kind') (fn ++ fn') (max n n') (nickname ++ nickname') (max bday bday') (adr ++ adr') (tel ++ tel') (email ++ email') (impp ++ impp') (org ++ org') (note ++ note') (max prodid prodid') (max rev rev') (url ++ url') (x ++ x')
+  where merge (ContentLines
+                version
+                source
+                kind
+                fn
+                n
+                nickname
+                bday
+                adr
+                tel
+                email
+                impp
+                org
+                note
+                prodid
+                rev
+                url
+                x)
+              (ContentLines
+                version'
+                source'
+                kind'
+                fn'
+                n'
+                nickname'
+                bday'
+                adr'
+                tel'
+                email'
+                impp'
+                org'
+                note'
+                prodid'
+                rev'
+                url'
+                x') =
+          ContentLines
+            (max version version')
+            (source ++ source')
+            (max kind kind')
+            (fn ++ fn')
+            (max n n')
+            (nickname ++ nickname')
+            (max bday bday')
+            (adr ++ adr')
+            (tel ++ tel')
+            (email ++ email')
+            (impp ++ impp')
+            (org ++ org')
+            (note ++ note')
+            (max prodid prodid')
+            (max rev rev')
+            (url ++ url')
+            (x ++ x')
 
 
 -- | Content Lines
