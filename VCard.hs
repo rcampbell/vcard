@@ -537,7 +537,7 @@ x = do
   g <- try (do g <- group
                lookAhead (istring "X-")
                return g)
-  n <- manyTill anyChar (noneOf ":;")
+  n <- manyTill (alphaNum <|> char '-') (oneOf ";:") -- 1*
   p <- params
   v <- manyTill anyChar crlf
   return $ CL g (X_NAME n) p (TEXT v)
