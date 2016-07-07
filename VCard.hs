@@ -72,6 +72,15 @@ vwrite = intercalate ","
 fwrite :: [[String]] -> String
 fwrite sss = intercalate ";" (map (intercalate ",") sss)
 
+{-
+rwrite ContentLine a => a -> String -> String -> String
+rwrite r v = mwrite (cl_group r) ++
+             (cl_name r) ++
+             write (cl_param r) ++
+             ":" ++
+             v ++
+             nl
+-}
 
 {- | Generic parsers -}
 
@@ -111,6 +120,45 @@ vcard = do
   return (VCard { vc_version = v, vc_properties = p }) -- TODO
 
 
+-- | Content Lines
+
+data Name = VERSION_CL | PRODID_CL | N_CL deriving (Show)
+
+data ContentLine a = ContentLine { cl_group :: Maybe Group
+                                 , cl_name  :: Name
+                           --      , cl_param :: Parameters -- [Parameter]
+                                 , cl_value :: a
+                               } deriving (Show)
+
+instance Write (ContentLine a) where
+  write cl = show (cl_name cl)
+
+versionCL :: Parser (ContentLine String)
+versionCL = do
+  string "VERSION:"
+  v <- manyTill anyChar crlf
+  return $ ContentLine Nothing VERSION_CL v
+
+prodidCL :: Parser (ContentLine String)
+prodidCL = do
+  string "PRODID:"
+  v <- manyTill anyChar crlf
+  return $ ContentLine Nothing PRODID_CL v
+
+nCL :: Parser (ContentLine [[String]])
+nCL = do
+  string "N:"
+  v <- propFields
+  crlf
+  return $ ContentLine Nothing N_CL v
+
+vcardCL = do
+  string "BEGIN:VCARD"
+  crlf
+  ls <- manyTill (versionCL <|> prodidCL) (string "END:VCARD")
+  return ls
+  
+
 -- | Groups
 
 data Group = Group String
@@ -124,6 +172,11 @@ group = do
   g <- optionMaybe (try group)
   return $ Group `liftM` g
     where group = manyTill (alphaNum <|> char '-') (char '.')
+
+prefix :: String -> Parser (Maybe Group)
+prefix name = try (do g <- group
+                      istring name
+                      return g)
 
 
 {- | 3.4. Property Value Escaping -}
@@ -315,12 +368,14 @@ end = do
 
 -- | 6.1.3. SOURCE *
 
-data SOURCE = SOURCE { source_param :: Parameters
+data SOURCE = SOURCE { source_group :: Maybe Group
+                     , source_param :: Parameters
                      , source_value :: String
                      } deriving (Show)
 
 instance Write SOURCE where
-  write r = "SOURCE" ++
+  write r = mwrite (source_group r) ++
+            "SOURCE" ++
             write (source_param r) ++
             ":" ++
             source_value r ++
@@ -328,21 +383,23 @@ instance Write SOURCE where
 
 source :: Parser SOURCE
 source = do
-  istring "SOURCE"
+  g <- prefix "SOURCE"
   p <- params
   char ':'
   v <- manyTill anyChar crlf
-  return $ SOURCE p v
+  return $ SOURCE g p v
 
 
 -- | 6.1.4. KIND *1
 
-data KIND = KIND { kind_param :: Parameters
+data KIND = KIND { kind_group :: Maybe Group
+                 , kind_param :: Parameters
                  , kind_value :: String
                  } deriving (Show)
 
 instance Write KIND where
-  write r = "KIND" ++
+  write r = mwrite (kind_group r) ++
+            "KIND" ++
             write (kind_param r) ++
             ":" ++
             kind_value r ++
@@ -350,11 +407,11 @@ instance Write KIND where
 
 kind :: Parser KIND
 kind = do
-  istring "KIND"
+  g <- prefix "KIND"
   p <- params
   char ':'
   v <- manyTill anyChar crlf
-  return $ KIND p v
+  return $ KIND g p v
 
 
 -- | 6.2.1. FN 1*
@@ -374,9 +431,7 @@ instance Write FN where
 
 fn ::Parser FN
 fn = do
-  g <- try (do g <- group
-               istring "FN"
-               return g)
+  g <- prefix "FN"
   p <- params
   char ':'
   v <- manyTill anyChar crlf
@@ -385,29 +440,39 @@ fn = do
 
 -- | 6.2.2. N *1
 
-data N = N [[String]]
-  deriving (Show)
+data N = N { n_group :: Maybe Group
+           , n_param :: Parameters
+           , n_value :: [[String]]
+           } deriving (Show)
 
 instance Write N where
-  write (N sss) = "N:" ++ fwrite sss ++ nl
+  write r = mwrite (n_group r) ++
+            "N" ++
+            write (n_param r) ++
+            ":" ++
+            fwrite (n_value r) ++
+            nl
 
 n :: Parser N
 n = do
-  ichar 'N'
+  g <- prefix "N"
+  p <- params
   char ':'
-  fs <- propFields 
+  v <- propFields 
   crlf
-  return $ N fs
+  return $ N g p v
 
 
 -- | 6.2.3. NICKNAME *
 
-data NICKNAME = NICKNAME { nickname_param :: Parameters
+data NICKNAME = NICKNAME { nickname_group :: Maybe Group
+                         , nickname_param :: Parameters
                          , nickname_value :: [String]
                          } deriving (Show)
 
 instance Write NICKNAME where
-  write r = "NICKNAME" ++
+  write r = mwrite (nickname_group r) ++
+            "NICKNAME" ++
             write (nickname_param r) ++
             ":" ++
             vwrite (nickname_value r) ++
@@ -415,12 +480,12 @@ instance Write NICKNAME where
 
 nickname :: Parser NICKNAME
 nickname = do
-  istring "NICKNAME"
+  g <- prefix "NICKNAME"
   p <- params
   char ':'
   v <- propValues
   crlf
-  return $ NICKNAME p v
+  return $ NICKNAME g p v
 
 
 -- | 6.2.4. PHOTO *
@@ -488,9 +553,7 @@ instance Write TEL where
 
 tel :: Parser TEL
 tel = do
-  g <- try (do g <- group
-               istring "TEL"
-               return g)
+  g <- prefix "TEL"
   p <- params
   char ':'
   v <- manyTill anyChar crlf
@@ -689,7 +752,7 @@ writeVCard f c = do
 
 -- UTILITY STUFF!!!!!!!
 p1 = do
-  result <- parseFromFile vcardEntity "../samples.vcf"
+  result <- parseFromFile vcardEntity "../sample1.vcf"
   case result of
     Left err -> print err
     Right xs -> do print xs
