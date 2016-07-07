@@ -20,6 +20,8 @@ import Test.HUnit
 
  * The folding (wrapping) logic isn't implemented, breaks
 
+ - Unfolding outside the parser screws up line numbers compared to the file
+
  - Parameters will need the same many (try permute) fix
 
  - Update params to assume ending :
@@ -254,17 +256,20 @@ propFields = do
 data Parameters = Parameters { param_value :: [VALUE]
                              , param_type  :: [TYPE]
                              , param_pref  :: [PREF]
+                             , param_x     :: [X_PARAM]
                              } deriving (Show, Eq, Ord)
 
 instance Write Parameters where
   write p = lwrite (param_value p) ++
             lwrite (param_type p) ++
-            lwrite (param_pref p)
+            lwrite (param_pref p) ++
+            lwrite (param_x p)
 
 params = permute (Parameters
                   <$?> ([], many1 valueParam)
                   <|?> ([], many1 typeParam)
-                  <|?> ([], many1 prefParam))
+                  <|?> ([], many1 prefParam)
+                  <|?> ([], many1 xParam))
 
 -- TODO somehow fail on unquoted : or ; unless it's the next param or value
 paramValues :: Parser [String]
@@ -278,6 +283,21 @@ paramValues = do
           v <- many (noneOf "\"")
           e <- char '"'
           return ([s] ++ v ++ [e])
+
+
+-- | x-name parameter
+
+data X_PARAM = X_PARAM String [String]
+  deriving (Show, Eq, Ord)
+
+instance Write X_PARAM where
+  write (X_PARAM n v) = ";" ++ n ++ "=" ++ (intercalate "," v)
+
+xParam = do
+  lookAhead (istring ";X-")
+  n <- manyTill anyChar (char '=')
+  v <- paramValues
+  return $ X_PARAM n v
           
           
 -- | 5.2. VALUE
