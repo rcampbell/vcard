@@ -17,7 +17,15 @@ import Test.HUnit
 
  * The permutation parser for contentlines fails on later isolated instances
 
- * Groups break my permutation parsing
+ * Groups break my permutation parsing. Here's what's happening: the very first
+   parser in each of the property parsers - literally the first line, now the
+   group line, but usually the istring "ADR" stuff - needs to fail for the
+   switch to happen. In other words, if the first parser succeeds, even if the
+   second one in the property parser fails (should be the name following the
+   group) then it won't actually switch to other parsers; it just fails out
+   saying it expected blah and blah. THE FAIL NEEDS TO HAPPEN IN THE FIRST PARSER.
+   I have no idea why. Also, consumption of input after a failure does matter;
+   the first parser which can fail needs a try for this to work!
 
  * The folding (wrapping) logic isn't implemented, breaks
 
@@ -111,10 +119,11 @@ data Group = Group String
 instance Write Group where
   write (Group s) = s ++ "."
 
-group :: Parser Group
+group :: Parser (Maybe Group)
 group = do
-  g <- manyTill (alphaNum <|> char '-') (char '.')
-  return $ Group g
+  g <- optionMaybe (try group)
+  return $ Group `liftM` g
+    where group = manyTill (alphaNum <|> char '-') (char '.')
 
 
 {- | 3.4. Property Value Escaping -}
@@ -254,9 +263,9 @@ instance Write Properties where
             lwrite (prop_fn p)       ++
             mwrite (prop_n p)        ++
             lwrite (prop_nickname p) ++
-            mwrite (prop_bday p)     ++
-            lwrite (prop_tel p)      ++
+            mwrite (prop_bday p)     ++       
             lwrite (prop_adr p)      ++
+            lwrite (prop_tel p)      ++    
             lwrite (prop_email p)    ++
             lwrite (prop_impp p)     ++
             lwrite (prop_org p)      ++
@@ -365,12 +374,13 @@ instance Write FN where
 
 fn ::Parser FN
 fn = do
- -- g <- optionMaybe (try group)
-  istring "FN"
+  g <- try (do g <- group
+               istring "FN"
+               return g)
   p <- params
   char ':'
   v <- manyTill anyChar crlf
-  return $ FN Nothing p v
+  return $ FN g p v
   
 
 -- | 6.2.2. N *1
@@ -442,7 +452,7 @@ data ADR = ADR { adr_group :: Maybe Group
                } deriving (Show)
 
 instance Write ADR where
-  write a = mwrite (adr_group a) ++            
+  write a = mwrite (adr_group a) ++
             "ADR" ++
             write (adr_param a) ++
             ":" ++
@@ -451,35 +461,40 @@ instance Write ADR where
 
 adr :: Parser ADR
 adr = do
- -- g <- optionMaybe (try group)
-  istring "ADR"
+  g <- try (do g <- group
+               istring "ADR"
+               return g)
   p <- params
   char ':'
   v <- propFields
   crlf
-  return $ ADR Nothing p v
+  return $ ADR g p v
 
 
 -- | 6.4.1. TEL *
 
-data TEL = TEL { tel_params :: Parameters
-               , tel_value  :: String
+data TEL = TEL { tel_group :: Maybe Group
+               , tel_param :: Parameters
+               , tel_value :: String
                } deriving (Show)
 
 instance Write TEL where
-  write t = "TEL" ++
-            write (tel_params t) ++
+  write r = mwrite (tel_group r) ++
+            "TEL" ++
+            write (tel_param r) ++
             ":" ++
-            tel_value t ++
+            tel_value r ++
             nl
 
 tel :: Parser TEL
 tel = do
-  istring "TEL"
-  ps <- params
+  g <- try (do g <- group
+               istring "TEL"
+               return g)
+  p <- params
   char ':'
   v <- manyTill anyChar crlf
-  return $ TEL { tel_params = ps, tel_value = v }
+  return $ TEL g p v
 
 
 -- | 6.4.2. EMAIL *
@@ -652,11 +667,12 @@ instance Write X where
 
 x :: Parser X
 x = do
---  g <- optionMaybe (try group)
-  lookAhead (try (istring "X-"))
+  g <- try (do g <- group
+               lookAhead (istring "X-")
+               return g)
   n <- manyTill anyChar (char ':')
   v <- manyTill anyChar crlf
-  return $ X Nothing n v
+  return $ X g n v
 
 
 {- | I/O -}
@@ -679,3 +695,22 @@ p1 = do
     Right xs -> do print xs
                    putStr "\n"
                    putStrLn (lwrite xs)
+
+
+-- sandbox
+
+p :: Parser (String, String)
+p = permute (pair
+              <$?> ("", pa)
+              <|?> ("", pb))
+  where pair a b = (a, b)
+
+pa :: Parser String
+pa = do
+  try (do optional (string "x1234")
+          many1 (char 'a'))
+
+pb :: Parser String
+pb = do
+  try (do optional (string "x1234")
+          many1 (char 'b'))
