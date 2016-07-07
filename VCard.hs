@@ -17,17 +17,9 @@ import Test.HUnit
 
  * The permutation parser for contentlines fails on later isolated instances
 
- * Groups break my permutation parsing. Here's what's happening: the very first
-   parser in each of the property parsers - literally the first line, now the
-   group line, but usually the istring "ADR" stuff - needs to fail for the
-   switch to happen. In other words, if the first parser succeeds, even if the
-   second one in the property parser fails (should be the name following the
-   group) then it won't actually switch to other parsers; it just fails out
-   saying it expected blah and blah. THE FAIL NEEDS TO HAPPEN IN THE FIRST PARSER.
-   I have no idea why. Also, consumption of input after a failure does matter;
-   the first parser which can fail needs a try for this to work!
-
  * The folding (wrapping) logic isn't implemented, breaks
+
+ - Update params to assume ending :
 
  - Date, time types, https://two-wrongs.com/haskell-time-library-tutorial
 
@@ -72,15 +64,6 @@ vwrite = intercalate ","
 fwrite :: [[String]] -> String
 fwrite sss = intercalate ";" (map (intercalate ",") sss)
 
-{-
-rwrite ContentLine a => a -> String -> String -> String
-rwrite r v = mwrite (cl_group r) ++
-             (cl_name r) ++
-             write (cl_param r) ++
-             ":" ++
-             v ++
-             nl
--}
 
 {- | Generic parsers -}
 
@@ -97,15 +80,14 @@ istring s = try (mapM ichar s) <?> "\"" ++ s ++ "\""
 
 -- | 3.3. ABNF Format Definition 1*
 
+
 data VCard = VCard
-  { vc_version    :: Maybe VERSION
-  , vc_properties :: Properties
+  { vc_contentlines :: ContentLines
   } deriving (Show)
 
 instance Write VCard where
   write c = "BEGIN:VCARD" ++ nl ++
-            mwrite (vc_version c) ++
-            write (vc_properties c) ++
+            write (vc_contentlines c) ++
             "END:VCARD" ++ nl
 
 vcardEntity = do
@@ -114,50 +96,46 @@ vcardEntity = do
 vcard :: Parser VCard
 vcard = do
   begin
-  v <- try (lookAhead (optionMaybe version)) -- TODO I think optionMaybe should be called AFTER the try.. not sure about lookAhead
-  p <- properties
+  cls <- contentLines
   end
-  return (VCard { vc_version = v, vc_properties = p }) -- TODO
+  return $ VCard cls
 
 
 -- | Content Lines
 
-data Name = VERSION_CL | PRODID_CL | N_CL deriving (Show)
+data Name = SOURCE | KIND | FN | N | NICKNAME | PHOTO | BDAY | ANNIVERSARY |
+            GENDER | ADR | TEL | EMAIL | IMPP | LANG | TZ | GEO | TITLE |
+            ROLE | LOGO | ORG | MEMBER | RELATED | CATEGORIES | NOTE | PRODID |
+            REV | SOUND | UID | CLIENTPIDMAP | URL | KEY | FBURL | CALADRURI |
+            CALURI | XML | VERSION | X_NAME String
+  deriving (Show)
 
-data ContentLine a = ContentLine { cl_group :: Maybe Group
-                                 , cl_name  :: Name
-                           --      , cl_param :: Parameters -- [Parameter]
-                                 , cl_value :: a
-                               } deriving (Show)
+data Value = TEXT String | TEXT' [String] | TEXT'' [[String]]
+  deriving (Show)
 
-instance Write (ContentLine a) where
-  write cl = show (cl_name cl)
+-- TODO why can't records have different type and constructor names..?
+data CL = CL { cl_group :: Maybe Group
+             , cl_name  :: Name
+             , cl_param :: Parameters -- [Parameter]
+             , cl_value :: Value
+             } deriving (Show)
 
-versionCL :: Parser (ContentLine String)
-versionCL = do
-  string "VERSION:"
-  v <- manyTill anyChar crlf
-  return $ ContentLine Nothing VERSION_CL v
-
-prodidCL :: Parser (ContentLine String)
-prodidCL = do
-  string "PRODID:"
-  v <- manyTill anyChar crlf
-  return $ ContentLine Nothing PRODID_CL v
-
-nCL :: Parser (ContentLine [[String]])
-nCL = do
-  string "N:"
-  v <- propFields
-  crlf
-  return $ ContentLine Nothing N_CL v
-
-vcardCL = do
-  string "BEGIN:VCARD"
-  crlf
-  ls <- manyTill (versionCL <|> prodidCL) (string "END:VCARD")
-  return ls
+instance Write Value where
+  write (TEXT s) = s
+  write (TEXT' ss) = vwrite ss
+  write (TEXT'' sss) = fwrite sss
   
+
+instance Write CL where
+  write cl = mwrite (cl_group cl) ++
+             name (cl_name cl)  ++
+             write (cl_param cl) ++
+             ":" ++
+             write (cl_value cl) ++
+             nl
+    where name (X_NAME s) = s
+          name n = show n
+
 
 -- | Groups
 
@@ -290,28 +268,29 @@ typeParam = do
 
 {- | 6. vCard Properties -}
 
-data Properties = Properties
-  { prop_source   :: [SOURCE]
-  , prop_kind     :: Maybe KIND
-  , prop_fn       :: [FN]
-  , prop_n        :: Maybe N
-  , prop_nickname :: [NICKNAME]
-  , prop_bday     :: Maybe BDAY
-  , prop_adr      :: [ADR]
-  , prop_tel      :: [TEL]
-  , prop_email    :: [EMAIL]
-  , prop_impp     :: [IMPP]
-  , prop_org      :: [ORG]
-  , prop_note     :: [NOTE]
-  , prop_prodid   :: Maybe PRODID
-  , prop_rev      :: Maybe REV
-  , prop_url      :: [URL]
-  , prop_version  :: Maybe VERSION
-  , prop_x        :: [X]
+data ContentLines = ContentLines
+  { prop_version  :: Maybe CL
+  , prop_source   :: [CL]
+  , prop_kind     :: Maybe CL
+  , prop_fn       :: [CL]
+  , prop_n        :: Maybe CL
+  , prop_nickname :: [CL]
+  , prop_bday     :: Maybe CL
+  , prop_adr      :: [CL]
+  , prop_tel      :: [CL]
+  , prop_email    :: [CL]
+  , prop_impp     :: [CL]
+  , prop_org      :: [CL]
+  , prop_note     :: [CL]
+  , prop_prodid   :: Maybe CL
+  , prop_rev      :: Maybe CL
+  , prop_url      :: [CL]
+  , prop_x        :: [CL]
   } deriving (Show)
 
-instance Write Properties where
-  write p = lwrite (prop_source p)   ++
+instance Write ContentLines where
+  write p = mwrite (prop_version p)  ++ -- ensure first
+            lwrite (prop_source p)   ++
             mwrite (prop_kind p)     ++
             lwrite (prop_fn p)       ++
             mwrite (prop_n p)        ++
@@ -328,24 +307,24 @@ instance Write Properties where
             lwrite (prop_url p)      ++
             lwrite (prop_x p)
 
-properties = permute (Properties
-                       <$?> ([], many1 source)
-                       <|?> (Nothing, Just `liftM` kind)
-                       <||> many1 fn
-                       <|?> (Nothing, Just `liftM` n)
-                       <|?> ([], many1 nickname)
-                       <|?> (Nothing, Just `liftM` bday)
-                       <|?> ([], many1 adr)
-                       <|?> ([], many1 tel)
-                       <|?> ([], many1 email)
-                       <|?> ([], many1 impp)
-                       <|?> ([], many1 org)
-                       <|?> ([], many1 note)
-                       <|?> (Nothing, Just `liftM` prodid)
-                       <|?> (Nothing, Just `liftM` rev)
-                       <|?> ([], many1 url)
-                       <|?> (Nothing, Just `liftM` version)
-                       <|?> ([], many1 x))                
+contentLines = permute (ContentLines
+                         <$?> (Nothing, Just `liftM` version) 
+                         <|?> ([], many1 source)
+                         <|?> (Nothing, Just `liftM` kind)
+                         <||> many1 fn
+                         <|?> (Nothing, Just `liftM` n)
+                         <|?> ([], many1 nickname)
+                         <|?> (Nothing, Just `liftM` bday)
+                         <|?> ([], many1 adr)
+                         <|?> ([], many1 tel)
+                         <|?> ([], many1 email)
+                         <|?> ([], many1 impp)
+                         <|?> ([], many1 org)
+                         <|?> ([], many1 note)
+                         <|?> (Nothing, Just `liftM` prodid)
+                         <|?> (Nothing, Just `liftM` rev)
+                         <|?> ([], many1 url)
+                         <|?> ([], many1 x))
 
 
 -- | 6.1.1. BEGIN 1
@@ -368,374 +347,200 @@ end = do
 
 -- | 6.1.3. SOURCE *
 
-data SOURCE = SOURCE { source_group :: Maybe Group
-                     , source_param :: Parameters
-                     , source_value :: String
-                     } deriving (Show)
-
-instance Write SOURCE where
-  write r = mwrite (source_group r) ++
-            "SOURCE" ++
-            write (source_param r) ++
-            ":" ++
-            source_value r ++
-            nl
-
-source :: Parser SOURCE
+source :: Parser CL
 source = do
-  g <- prefix "SOURCE"
+  g <- prefix (show SOURCE)
   p <- params
   char ':'
   v <- manyTill anyChar crlf
-  return $ SOURCE g p v
+  return $ CL g SOURCE p (TEXT v)
 
 
 -- | 6.1.4. KIND *1
 
-data KIND = KIND { kind_group :: Maybe Group
-                 , kind_param :: Parameters
-                 , kind_value :: String
-                 } deriving (Show)
-
-instance Write KIND where
-  write r = mwrite (kind_group r) ++
-            "KIND" ++
-            write (kind_param r) ++
-            ":" ++
-            kind_value r ++
-            nl
-
-kind :: Parser KIND
+kind :: Parser CL
 kind = do
-  g <- prefix "KIND"
+  g <- prefix (show KIND)
   p <- params
   char ':'
   v <- manyTill anyChar crlf
-  return $ KIND g p v
+  return $ CL g KIND p (TEXT v)
 
 
 -- | 6.2.1. FN 1*
 
-data FN = FN { fn_group :: Maybe Group
-             , fn_param :: Parameters
-             , fn_value :: String
-             } deriving (Show)
-
-instance Write FN where
-  write r = mwrite (fn_group r) ++
-            "FN" ++
-            write (fn_param r) ++
-            ":" ++
-            fn_value r ++
-            nl
-
-fn ::Parser FN
+fn ::Parser CL
 fn = do
-  g <- prefix "FN"
+  g <- prefix (show FN)
   p <- params
   char ':'
   v <- manyTill anyChar crlf
-  return $ FN g p v
+  return $ CL g FN p (TEXT v)
   
 
 -- | 6.2.2. N *1
 
-data N = N { n_group :: Maybe Group
-           , n_param :: Parameters
-           , n_value :: [[String]]
-           } deriving (Show)
-
-instance Write N where
-  write r = mwrite (n_group r) ++
-            "N" ++
-            write (n_param r) ++
-            ":" ++
-            fwrite (n_value r) ++
-            nl
-
-n :: Parser N
+n :: Parser CL
 n = do
-  g <- prefix "N"
+  g <- prefix (show N)
   p <- params
   char ':'
   v <- propFields 
   crlf
-  return $ N g p v
+  return $ CL g N p (TEXT'' v)
 
 
 -- | 6.2.3. NICKNAME *
 
-data NICKNAME = NICKNAME { nickname_group :: Maybe Group
-                         , nickname_param :: Parameters
-                         , nickname_value :: [String]
-                         } deriving (Show)
-
-instance Write NICKNAME where
-  write r = mwrite (nickname_group r) ++
-            "NICKNAME" ++
-            write (nickname_param r) ++
-            ":" ++
-            vwrite (nickname_value r) ++
-            nl
-
-nickname :: Parser NICKNAME
+nickname :: Parser CL
 nickname = do
-  g <- prefix "NICKNAME"
+  g <- prefix (show NICKNAME)
   p <- params
   char ':'
   v <- propValues
   crlf
-  return $ NICKNAME g p v
+  return $ CL g NICKNAME p (TEXT' v)
 
 
 -- | 6.2.4. PHOTO *
 
 -- | 6.2.5. BDAY *1
 
-data BDAY = BDAY { bday_param :: Parameters
-                 --, bday_value :: Either Date String
-                 , bday_value :: String
-                 } deriving (Show)
-
-instance Write BDAY where
-  write r = ""
-
-bday :: Parser BDAY
+bday :: Parser CL -- TODO date support
 bday = do
-  istring "BDAY"
+  g <- prefix (show BDAY)
   p <- params
   char ':'
   v <- manyTill anyChar crlf
-  return $ BDAY p v
+  return $ CL g BDAY p (TEXT v)
                  
 
 -- | 6.3.1. ADR *
 
-data ADR = ADR { adr_group :: Maybe Group
-               , adr_param :: Parameters
-               , adr_value :: [[String]]
-               } deriving (Show)
-
-instance Write ADR where
-  write a = mwrite (adr_group a) ++
-            "ADR" ++
-            write (adr_param a) ++
-            ":" ++
-            fwrite (adr_value a) ++
-            nl
-
-adr :: Parser ADR
+adr :: Parser CL
 adr = do
-  g <- try (do g <- group
-               istring "ADR"
-               return g)
+  g <- prefix (show ADR)
   p <- params
   char ':'
   v <- propFields
   crlf
-  return $ ADR g p v
+  return $ CL g ADR p (TEXT'' v)
 
 
 -- | 6.4.1. TEL *
 
-data TEL = TEL { tel_group :: Maybe Group
-               , tel_param :: Parameters
-               , tel_value :: String
-               } deriving (Show)
-
-instance Write TEL where
-  write r = mwrite (tel_group r) ++
-            "TEL" ++
-            write (tel_param r) ++
-            ":" ++
-            tel_value r ++
-            nl
-
-tel :: Parser TEL
+tel :: Parser CL
 tel = do
-  g <- prefix "TEL"
+  g <- prefix (show TEL)
   p <- params
   char ':'
   v <- manyTill anyChar crlf
-  return $ TEL g p v
+  return $ CL g TEL p (TEXT v)
 
 
 -- | 6.4.2. EMAIL *
 
-data EMAIL = EMAIL { email_param :: Parameters
-                   , email_value :: String
-                   } deriving (Show)
-
-instance Write EMAIL where
-  write r = "EMAIL" ++
-            write (email_param r) ++
-            ":" ++
-            email_value r ++
-            nl
-
-email :: Parser EMAIL
+email :: Parser CL
 email = do
-  istring "EMAIL"
+  g <- prefix (show EMAIL)
   p <- params
   char ':'
   v <- manyTill anyChar crlf
-  return $ EMAIL p v
+  return $ CL g EMAIL p (TEXT v)
 
 
 -- | 6.4.3. IMPP *
 
-data IMPP = IMPP { impp_param :: Parameters
-                 , impp_value :: String
-                 } deriving (Show)
-
-instance Write IMPP where
-  write r = "IMPP" ++
-            write (impp_param r) ++
-            ":" ++
-            impp_value r ++
-            nl
-
 -- TODO spit out some URI validation warning, though I don't think I want to toss them..
-impp :: Parser IMPP
+impp :: Parser CL
 impp = do
-  istring "IMPP"
+  g <- prefix (show IMPP)
   p <- params
   char ':'
   v <- manyTill anyChar crlf
-  return $ IMPP p v
+  return $ CL g IMPP p (TEXT v)
 
 
 -- | 6.6.4. ORG *
 
-data ORG = ORG [[String]]
-  deriving (Show)
-
-instance Write ORG where
-  write (ORG sss) = "ORG:" ++ fwrite sss ++ nl
-
-org :: Parser ORG
+org :: Parser CL
 org = do
-  istring "ORG"
+  g <- prefix (show ORG)
+  p <- params
   char ':'
   v <- propFields
   crlf
-  return $ ORG v
+  return $ CL g ORG p (TEXT'' v)
 
 
 -- | 6.7.2. NOTE *
 
-data NOTE = NOTE { note_param :: Parameters
-                 , note_value :: String
-                 } deriving (Show)
-
-instance Write NOTE where
-  write n = "NOTE" ++
-            write (note_param n) ++
-            ":" ++
-            note_value n ++
-            nl
-
-note :: Parser NOTE
+note :: Parser CL
 note = do
-  istring "NOTE"
+  g <- prefix (show NOTE)
   p <- params
   char ':'
   v <- manyTill anyChar crlf
-  return $ NOTE p v
+  return $ CL g NOTE p (TEXT v)
+
 
 -- | 6.7.3. PRODID *1
 
-data PRODID = PRODID String
-  deriving (Show)
-
-instance Write PRODID where
-  write (PRODID s) = "PRODID:" ++ s ++ nl
-  
-prodid :: Parser PRODID
+prodid :: Parser CL
 prodid = do
-  istring "PRODID"
+  g <- prefix (show PRODID)
+  p <- params
   char ':'
   v <- manyTill anyChar crlf
-  return $ PRODID v
+  return $ CL g PRODID p (TEXT v)
 
 
 -- | 6.7.4. REV *1
 
-data REV = REV String
-  deriving (Show)
-
-instance Write REV where
-  write (REV s) = "REV:" ++ s ++ nl
-
-rev :: Parser REV
+rev :: Parser CL
 rev = do
-  istring "REV"
+  g <- prefix (show REV)
+  p <- params
   char ':'
   v <- manyTill anyChar crlf
-  return $ REV v
+  return $ CL g REV p (TEXT v)
 
 
 -- | 6.7.8. URL *
 
-data URL = URL { url_param :: Parameters
-               , url_value :: String
-               } deriving (Show)
-
-instance Write URL where
-  write u = "URL" ++
-            write (url_param u) ++
-            ":" ++
-            url_value u ++
-            nl
-
 -- TODO issue warning if v not a valid URI, don't think I want to toss it out though..
-url :: Parser URL
+url :: Parser CL
 url = do
-  istring "URL"
+  g <- prefix (show URL)
   p <- params
   char ':'
   v <- manyTill anyChar crlf
-  return $ URL p v
+  return $ CL g URL p (TEXT v)
 
 
 -- | 6.7.9. VERSION 1
 
-data VERSION = VERSION String
-  deriving (Show)
-
-instance Write VERSION where
-  write (VERSION s) = "VERSION:" ++ s ++ nl
-
-version :: Parser VERSION
+version :: Parser CL
 version = do
-  istring "VERSION:"
+  istring (show VERSION)
+  p <- params
+  char ':'
   v <- (string "4.0" <|> string "3.0" <|> string "2.1")
   crlf
-  return $ VERSION v
+  return $ CL Nothing VERSION p (TEXT v)
   
 
 -- | 6.10. Extended Properties and Parameters *
 
-data X = X { x_group :: Maybe Group
-           , x_name  :: String
-           , x_value :: String
-           } deriving (Show)
-
-instance Write X where
-  write x = mwrite (x_group x) ++
-            x_name x ++
-            ":" ++
-            x_value x ++
-            nl
-
-x :: Parser X
+x :: Parser CL
 x = do
   g <- try (do g <- group
                lookAhead (istring "X-")
                return g)
-  n <- manyTill anyChar (char ':')
+  n <- manyTill anyChar (noneOf ":;")
+  p <- params
   v <- manyTill anyChar crlf
-  return $ X g n v
+  return $ CL g (X_NAME n) p (TEXT v)
 
 
 {- | I/O -}
@@ -751,6 +556,7 @@ writeVCard f c = do
     hPutStr h (write c)
 
 -- UTILITY STUFF!!!!!!!
+
 p1 = do
   result <- parseFromFile vcardEntity "../sample1.vcf"
   case result of
@@ -760,20 +566,19 @@ p1 = do
                    putStrLn (lwrite xs)
 
 
+
 -- sandbox
 
-p :: Parser (String, String)
+--p :: Parser [[String]]
 p = permute (pair
-              <$?> ("", pa)
-              <|?> ("", pb))
+              <$$> pa
+              <|?> ([], pb))
   where pair a b = (a, b)
 
 pa :: Parser String
 pa = do
-  try (do optional (string "x1234")
-          many1 (char 'a'))
+  many1 (char 'a')
 
 pb :: Parser String
 pb = do
-  try (do optional (string "x1234")
-          many1 (char 'b'))
+  many1 (char 'b')
