@@ -125,6 +125,30 @@ merge funcs reg1 reg2 =
             let npResult  = unI (hsequence (hap (hap funcs np1) np2))
             in  to (SOP (Z npResult))
 
+instance Generic ContentLines -- this Generic is from generics-sop
+
+mergeContentLines :: ContentLines -> ContentLines -> ContentLines
+mergeContentLines = merge (fn_2' max  :*
+                           fn_2' (++) :*
+                           fn_2' max  :*
+                           fn_2' (++) :*
+                           fn_2' max  :*
+                           fn_2' (++) :*
+                           fn_2' max  :*
+                           fn_2' max  :*
+                           fn_2' max  :*
+                           fn_2' (++) :*
+                           fn_2' (++) :*
+                           fn_2' (++) :*
+                           fn_2' (++) :*
+                           fn_2' (++) :*
+                           fn_2' (++) :*
+                           fn_2' (++) :*
+                           fn_2' max  :*
+                           fn_2' max  :*
+                           fn_2' (++) :*
+                           fn_2' (++) :*
+                           Nil)            
 
 vcard :: Parser VCard
 vcard = do
@@ -400,31 +424,6 @@ data ContentLines = ContentLines
   , prop_url         :: [CL]
   , prop_x           :: [CL]
   } deriving (Show, GHC.Generic)
-
-instance Generic ContentLines -- this Generic is from generics-sop
-
-mergeContentLines :: ContentLines -> ContentLines -> ContentLines
-mergeContentLines = merge (fn_2' max  :*
-                           fn_2' (++) :*
-                           fn_2' max  :*
-                           fn_2' (++) :*
-                           fn_2' max  :*
-                           fn_2' (++) :*
-                           fn_2' max  :*
-                           fn_2' max  :*
-                           fn_2' max  :*
-                           fn_2' (++) :*
-                           fn_2' (++) :*
-                           fn_2' (++) :*
-                           fn_2' (++) :*
-                           fn_2' (++) :*
-                           fn_2' (++) :*
-                           fn_2' (++) :*
-                           fn_2' max  :*
-                           fn_2' max  :*
-                           fn_2' (++) :*
-                           fn_2' (++) :*
-                           Nil)
 
 instance Write ContentLines where
   write p = mwrite (prop_version p)     ++ -- ensure first
