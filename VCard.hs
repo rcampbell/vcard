@@ -15,6 +15,9 @@ import Data.Time.Format (parseTimeM, formatTime, defaultTimeLocale)
 import Data.Time.Clock (UTCTime)
 import Test.HUnit
 
+import qualified Control.Foldl as L
+import Data.Profunctor
+
 {- TODO
 
  - Unfolding outside the parser screws up line numbers compared to the file
@@ -103,11 +106,25 @@ instance Write VCard where
 
 vcardEntity = many1 vcard
 
+-- EXPERIMENTAL foldl approach
+
+foldVersion :: L.Fold ContentLines (Maybe CL)
+foldVersion = lmap prop_version (L.Fold max Nothing id)
+
+foldFn :: L.Fold ContentLines [CL]
+foldFn = lmap prop_fn (L.Fold (++) [] id)
+
+--foldContentLines :: L.Fold ContentLines ContentLines
+foldContentLines = ContentLines <$> foldVersion <*> foldFn
+
+tester cs = L.fold foldContentLines cs
+
+
 vcard :: Parser VCard
 vcard = do
   begin
   cls <- manyTill (try contentLines) end
-  return $ VCard (foldl1 merge cls)
+  return $ VCard (tester cls) --(foldl1 merge cls)
   -- TODO this is the ugliest thing I've ever written
   where merge (ContentLines
                 version
