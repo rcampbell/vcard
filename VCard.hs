@@ -404,24 +404,24 @@ data ContentLines = ContentLines
 instance Generic ContentLines -- this Generic is from generics-sop
 
 mergeContentLines :: ContentLines -> ContentLines -> ContentLines
-mergeContentLines = merge (fn_2' max :*
+mergeContentLines = merge (fn_2' max  :*
                            fn_2' (++) :*
-                           fn_2' max :*
+                           fn_2' max  :*
                            fn_2' (++) :*
-                           fn_2' max :*
+                           fn_2' max  :*
                            fn_2' (++) :*
-                           fn_2' max :*
-                           fn_2' max :*
-                           fn_2' max :*
-                           fn_2' (++) :*
-                           fn_2' (++) :*
+                           fn_2' max  :*
+                           fn_2' max  :*
+                           fn_2' max  :*
                            fn_2' (++) :*
                            fn_2' (++) :*
                            fn_2' (++) :*
                            fn_2' (++) :*
                            fn_2' (++) :*
-                           fn_2' max :*
-                           fn_2' max :*
+                           fn_2' (++) :*
+                           fn_2' (++) :*
+                           fn_2' max  :*
+                           fn_2' max  :*
                            fn_2' (++) :*
                            fn_2' (++) :*
                            Nil)
