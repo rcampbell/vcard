@@ -1,4 +1,9 @@
 -- {-# LANGUAGE OverloadedStrings #-}
+{-# language TypeOperators #-}
+{-# language DeriveGeneric #-}
+{-# language TypeFamilies #-}
+{-# language DataKinds #-}
+
 module VCard where
 
 import System.IO (withFile, IOMode(WriteMode), hSetEncoding, utf8, hPutStr)
@@ -14,6 +19,10 @@ import Data.List (intercalate, lines)
 import Data.Time.Format (parseTimeM, formatTime, defaultTimeLocale)
 import Data.Time.Clock (UTCTime)
 import Test.HUnit
+
+import Control.Applicative (liftA2)
+import qualified GHC.Generics as GHC
+import Generics.SOP
 
 {- TODO
 
@@ -103,75 +112,25 @@ instance Write VCard where
 
 vcardEntity = many1 vcard
 
+-- EXPERIMENTAL generics approach
+-- https://stackoverflow.com/questions/38248692/whats-a-better-way-of-managing-large-haskell-records
+
+fn_2' :: (a -> a -> a) -> (I -.-> (I -.-> I)) a -- I is simply an Identity functor
+fn_2' = fn_2 . liftA2
+
+merge :: (Generic a, Code a ~ '[ xs ]) => NP (I -.-> (I -.-> I)) xs -> a -> a -> a 
+merge funcs reg1 reg2 =
+    case (from reg1, from reg2) of 
+        (SOP (Z np1), SOP (Z np2)) -> 
+            let npResult  = unI (hsequence (hap (hap funcs np1) np2))
+            in  to (SOP (Z npResult))
+
+
 vcard :: Parser VCard
 vcard = do
   begin
   cls <- manyTill (try contentLines) end
-  return $ VCard (foldl1 merge cls)
-  -- TODO this is the ugliest thing I've ever written
-  where merge (ContentLines
-                version
-                source
-                kind
-                fn
-                n
-                nickname
-                bday
-                anniversary
-                gender
-                adr
-                tel
-                email
-                impp
-                lang
-                org
-                note
-                prodid
-                rev
-                url
-                x)
-              (ContentLines
-                version'
-                source'
-                kind'
-                fn'
-                n'
-                nickname'
-                bday'
-                anniversary'
-                gender'
-                adr'
-                tel'
-                email'
-                impp'
-                lang'
-                org'
-                note'
-                prodid'
-                rev'
-                url'
-                x') =
-          ContentLines
-            (max version version')
-            (source ++ source')
-            (max kind kind')
-            (fn ++ fn')
-            (max n n')
-            (nickname ++ nickname')
-            (max bday bday')
-            (max anniversary anniversary')
-            (max gender gender')
-            (adr ++ adr')
-            (tel ++ tel')
-            (email ++ email')
-            (impp ++ impp')
-            (lang ++ lang')
-            (org ++ org')
-            (note ++ note')
-            (max prodid prodid')
-            (max rev rev')
-            (url ++ url')
-            (x ++ x')
+  return $ VCard (foldl1 mergeContentLines cls)
 
 
 -- | Content Lines
@@ -440,7 +399,32 @@ data ContentLines = ContentLines
   , prop_rev         :: Maybe CL
   , prop_url         :: [CL]
   , prop_x           :: [CL]
-  } deriving (Show)
+  } deriving (Show, GHC.Generic)
+
+instance Generic ContentLines -- this Generic is from generics-sop
+
+mergeContentLines :: ContentLines -> ContentLines -> ContentLines
+mergeContentLines = merge (fn_2' max :*
+                           fn_2' (++) :*
+                           fn_2' max :*
+                           fn_2' (++) :*
+                           fn_2' max :*
+                           fn_2' (++) :*
+                           fn_2' max :*
+                           fn_2' max :*
+                           fn_2' max :*
+                           fn_2' (++) :*
+                           fn_2' (++) :*
+                           fn_2' (++) :*
+                           fn_2' (++) :*
+                           fn_2' (++) :*
+                           fn_2' (++) :*
+                           fn_2' (++) :*
+                           fn_2' max :*
+                           fn_2' max :*
+                           fn_2' (++) :*
+                           fn_2' (++) :*
+                           Nil)
 
 instance Write ContentLines where
   write p = mwrite (prop_version p)     ++ -- ensure first
@@ -468,7 +452,7 @@ contentLines = permute (ContentLines
                          <$?> (Nothing, Just `liftM` version) 
                          <|?> ([], many1 source)
                          <|?> (Nothing, Just `liftM` kind)
-                         <|?> ([], many1 fn) -- TODO required, but changed to optional for the many try permute fix. If you apply N times you can't have a required once property parsed N times..
+                         <|?> ([], many1 VCard.fn) -- TODO required, but changed to optional for the many try permute fix. If you apply N times you can't have a required once property parsed N times..
                          <|?> (Nothing, Just `liftM` n)
                          <|?> ([], many1 nickname)
                          <|?> (Nothing, Just `liftM` bday)
