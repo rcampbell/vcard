@@ -117,10 +117,13 @@ vcard = do
                 n
                 nickname
                 bday
+                anniversary
+                gender
                 adr
                 tel
                 email
                 impp
+                lang
                 org
                 note
                 prodid
@@ -135,10 +138,13 @@ vcard = do
                 n'
                 nickname'
                 bday'
+                anniversary'
+                gender'
                 adr'
                 tel'
                 email'
                 impp'
+                lang'
                 org'
                 note'
                 prodid'
@@ -153,10 +159,13 @@ vcard = do
             (max n n')
             (nickname ++ nickname')
             (max bday bday')
+            (max anniversary anniversary')
+            (max gender gender')
             (adr ++ adr')
             (tel ++ tel')
             (email ++ email')
             (impp ++ impp')
+            (lang ++ lang')
             (org ++ org')
             (note ++ note')
             (max prodid prodid')
@@ -408,60 +417,68 @@ typeParam = do
 
 
 
-
 {- | 6. vCard Properties -}
 
 data ContentLines = ContentLines
-  { prop_version  :: Maybe CL
-  , prop_source   :: [CL]
-  , prop_kind     :: Maybe CL
-  , prop_fn       :: [CL]
-  , prop_n        :: Maybe CL
-  , prop_nickname :: [CL]
-  , prop_bday     :: Maybe CL
-  , prop_adr      :: [CL]
-  , prop_tel      :: [CL]
-  , prop_email    :: [CL]
-  , prop_impp     :: [CL]
-  , prop_org      :: [CL]
-  , prop_note     :: [CL]
-  , prop_prodid   :: Maybe CL
-  , prop_rev      :: Maybe CL
-  , prop_url      :: [CL]
-  , prop_x        :: [CL]
+  { prop_version     :: Maybe CL
+  , prop_source      :: [CL]
+  , prop_kind        :: Maybe CL
+  , prop_fn          :: [CL]
+  , prop_n           :: Maybe CL
+  , prop_nickname    :: [CL]
+  , prop_bday        :: Maybe CL
+  , prop_anniversary :: Maybe CL
+  , prop_gender      :: Maybe CL
+  , prop_adr         :: [CL]
+  , prop_tel         :: [CL]
+  , prop_email       :: [CL]
+  , prop_impp        :: [CL]
+  , prop_lang        :: [CL]
+  , prop_org         :: [CL]
+  , prop_note        :: [CL]
+  , prop_prodid      :: Maybe CL
+  , prop_rev         :: Maybe CL
+  , prop_url         :: [CL]
+  , prop_x           :: [CL]
   } deriving (Show)
 
 instance Write ContentLines where
-  write p = mwrite (prop_version p)  ++ -- ensure first
-            lwrite (prop_source p)   ++
-            mwrite (prop_kind p)     ++
-            lwrite (prop_fn p)       ++
-            mwrite (prop_n p)        ++
-            lwrite (prop_nickname p) ++
-            mwrite (prop_bday p)     ++       
-            lwrite (prop_adr p)      ++
-            lwrite (prop_tel p)      ++    
-            lwrite (prop_email p)    ++
-            lwrite (prop_impp p)     ++
-            lwrite (prop_org p)      ++
-            lwrite (prop_note p)     ++
-            mwrite (prop_prodid p)   ++
-            mwrite (prop_rev p)      ++
-            lwrite (prop_url p)      ++
+  write p = mwrite (prop_version p)     ++ -- ensure first
+            lwrite (prop_source p)      ++
+            mwrite (prop_kind p)        ++
+            lwrite (prop_fn p)          ++
+            mwrite (prop_n p)           ++
+            lwrite (prop_nickname p)    ++
+            mwrite (prop_bday p)        ++
+            mwrite (prop_anniversary p) ++
+            mwrite (prop_gender p)      ++
+            lwrite (prop_adr p)         ++
+            lwrite (prop_tel p)         ++    
+            lwrite (prop_email p)       ++
+            lwrite (prop_impp p)        ++
+            lwrite (prop_lang p)        ++
+            lwrite (prop_org p)         ++
+            lwrite (prop_note p)        ++
+            mwrite (prop_prodid p)      ++
+            mwrite (prop_rev p)         ++
+            lwrite (prop_url p)         ++
             lwrite (prop_x p)
 
 contentLines = permute (ContentLines
                          <$?> (Nothing, Just `liftM` version) 
                          <|?> ([], many1 source)
                          <|?> (Nothing, Just `liftM` kind)
-                         <|?> ([], many1 fn) -- TODO req, but changed to opt for many try
+                         <|?> ([], many1 fn) -- TODO required, but changed to optional for the many try permute fix. If you apply N times you can't have a required once property parsed N times..
                          <|?> (Nothing, Just `liftM` n)
                          <|?> ([], many1 nickname)
                          <|?> (Nothing, Just `liftM` bday)
+                         <|?> (Nothing, Just `liftM` anniversary)
+                         <|?> (Nothing, Just `liftM` gender)
                          <|?> ([], many1 adr)
                          <|?> ([], many1 tel)
                          <|?> ([], many1 email)
                          <|?> ([], many1 impp)
+                         <|?> ([], many1 lang)
                          <|?> ([], many1 org)
                          <|?> ([], many1 note)
                          <|?> (Nothing, Just `liftM` prodid)
@@ -547,6 +564,8 @@ nickname = do
 
 -- | 6.2.4. PHOTO *
 
+
+
 -- | 6.2.5. BDAY *1
 
 bday :: Parser CL -- TODO date support
@@ -556,6 +575,29 @@ bday = do
   char ':'
   v <- manyTill anyChar crlf
   return $ CL g BDAY p (TEXT v)
+
+
+-- | 6.2.6. ANNIVERSARY *1
+
+anniversary :: Parser CL -- TODO date support
+anniversary = do
+  g <- prefix (show ANNIVERSARY)
+  p <- params
+  char ':'
+  v <- manyTill anyChar crlf
+  return $ CL g ANNIVERSARY p (TEXT v)
+
+
+-- | 6.2.7. GENDER *1
+
+gender :: Parser CL
+gender = do
+  g <- prefix (show GENDER)
+  p <- params
+  char ':'
+  v <- propFields
+  crlf
+  return $ CL g GENDER p (TEXT'' v)
                  
 
 -- | 6.3.1. ADR *
@@ -602,6 +644,17 @@ impp = do
   char ':'
   v <- manyTill anyChar crlf
   return $ CL g IMPP p (TEXT v)
+
+
+-- | 6.4.4. LANG *
+
+lang :: Parser CL
+lang = do
+  g <- prefix (show LANG)
+  p <- params
+  char ':'
+  v <- manyTill anyChar crlf
+  return $ CL g LANG p (TEXT v)
 
 
 -- | 6.6.4. ORG *
