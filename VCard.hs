@@ -107,88 +107,44 @@ instance Write VCard where
 vcardEntity = many1 vcard
 
 -- EXPERIMENTAL foldl approach
+-- https://stackoverflow.com/questions/38230875/please-explain-the-behavior-of-this-parsec-permutation-parser
 
-foldVersion :: L.Fold ContentLines (Maybe CL)
-foldVersion = lmap prop_version (L.Fold max Nothing id)
+mfold :: (ContentLines -> Maybe CL) -> L.Fold ContentLines (Maybe CL)
+mfold f = lmap f (L.Fold max Nothing id)
 
-foldFn :: L.Fold ContentLines [CL]
-foldFn = lmap prop_fn (L.Fold (++) [] id)
+lfold :: (ContentLines -> [CL]) -> L.Fold ContentLines [CL]
+lfold f = lmap f (L.Fold (++) [] id)
 
---foldContentLines :: L.Fold ContentLines ContentLines
-foldContentLines = ContentLines <$> foldVersion <*> foldFn
+foldContentLines :: L.Fold ContentLines ContentLines
+foldContentLines = ContentLines
+                    <$> mfold prop_version
+                    <*> lfold prop_source
+                    <*> mfold prop_kind
+                    <*> lfold prop_fn
+                    <*> mfold prop_n
+                    <*> lfold prop_nickname
+                    <*> mfold prop_bday
+                    <*> mfold prop_anniversary
+                    <*> mfold prop_gender
+                    <*> lfold prop_adr
+                    <*> lfold prop_tel
+                    <*> lfold prop_email
+                    <*> lfold prop_impp
+                    <*> lfold prop_lang
+                    <*> lfold prop_org
+                    <*> lfold prop_note
+                    <*> mfold prop_prodid
+                    <*> mfold prop_rev
+                    <*> lfold prop_url
+                    <*> lfold prop_x
 
-tester cs = L.fold foldContentLines cs
-
+merge cs = L.fold foldContentLines cs
 
 vcard :: Parser VCard
 vcard = do
   begin
   cls <- manyTill (try contentLines) end
-  return $ VCard (tester cls) --(foldl1 merge cls)
-  -- TODO this is the ugliest thing I've ever written
-  where merge (ContentLines
-                version
-                source
-                kind
-                fn
-                n
-                nickname
-                bday
-                anniversary
-                gender
-                adr
-                tel
-                email
-                impp
-                lang
-                org
-                note
-                prodid
-                rev
-                url
-                x)
-              (ContentLines
-                version'
-                source'
-                kind'
-                fn'
-                n'
-                nickname'
-                bday'
-                anniversary'
-                gender'
-                adr'
-                tel'
-                email'
-                impp'
-                lang'
-                org'
-                note'
-                prodid'
-                rev'
-                url'
-                x') =
-          ContentLines
-            (max version version')
-            (source ++ source')
-            (max kind kind')
-            (fn ++ fn')
-            (max n n')
-            (nickname ++ nickname')
-            (max bday bday')
-            (max anniversary anniversary')
-            (max gender gender')
-            (adr ++ adr')
-            (tel ++ tel')
-            (email ++ email')
-            (impp ++ impp')
-            (lang ++ lang')
-            (org ++ org')
-            (note ++ note')
-            (max prodid prodid')
-            (max rev rev')
-            (url ++ url')
-            (x ++ x')
+  return $ VCard (merge cls)
 
 
 -- | Content Lines
